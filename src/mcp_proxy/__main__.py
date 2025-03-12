@@ -17,6 +17,7 @@ from mcp.client.stdio import StdioServerParameters
 
 from .sse_client import run_sse_client
 from .sse_server import SseServerSettings, run_sse_server
+from .server_manager import server_manager
 
 logging.basicConfig(level=logging.DEBUG)
 SSE_URL: t.Final[str | None] = os.getenv(
@@ -38,6 +39,8 @@ def main() -> None:
             "  mcp-proxy --sse-port 8080 -- your-command --arg1 value1 --arg2 value2\n"
             "  mcp-proxy your-command --sse-port 8080 -e KEY VALUE -e ANOTHER_KEY ANOTHER_VALUE\n"
             "  mcp-proxy your-command --sse-port 8080 --allow-origin='*'\n"
+            "  mcp-proxy --local-server slack --sse-port 8080\n"
+            "  mcp-proxy --list-servers\n"
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -50,6 +53,20 @@ def main() -> None:
         ),
         nargs="?",  # Required below to allow for coming form env var
         default=SSE_URL,
+    )
+
+    # Add local server options
+    local_server_group = parser.add_argument_group("Local server options")
+    local_server_group.add_argument(
+        "--local-server",
+        help="Name of a local MCP server to run. Use --list-servers to see available servers.",
+        default=None,
+    )
+    local_server_group.add_argument(
+        "--list-servers",
+        action="store_true",
+        help="List all available local MCP servers and exit.",
+        default=False,
     )
 
     sse_client_group = parser.add_argument_group("SSE client options")
@@ -106,6 +123,30 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    # Handle --list-servers flag
+    if args.list_servers:
+        available_servers = server_manager.list_available_servers()
+        if available_servers:
+            print("Available local MCP servers:")
+            for server_name in available_servers:
+                server_info = server_manager.get_server_info(server_name)
+                description = server_info.get("description", "No description") if server_info else ""
+                print(f"  - {server_name}: {description}")
+        else:
+            print("No local MCP servers available.")
+        sys.exit(0)
+
+    # Handle local server
+    if args.local_server:
+        logging.debug(f"Starting local server: {args.local_server}")
+        sse_settings = SseServerSettings(
+            bind_host=args.sse_host,
+            port=args.sse_port,
+            allow_origins=args.allow_origin if len(args.allow_origin) > 0 else None,
+        )
+        asyncio.run(run_local_server(args.local_server, sse_settings))
+        return
+
     if not args.command_or_url:
         parser.print_help()
         sys.exit(1)
@@ -145,6 +186,42 @@ def main() -> None:
         allow_origins=args.allow_origin if len(args.allow_origin) > 0 else None,
     )
     asyncio.run(run_sse_server(stdio_params, sse_settings))
+
+
+async def run_local_server(server_name: str, sse_settings: SseServerSettings) -> None:
+    """Run a local MCP server.
+    
+    Args:
+        server_name: Name of the local server to run
+        sse_settings: Settings for the SSE server
+    """
+    from .sse_server import create_starlette_app
+    import uvicorn
+
+    # Create the local server
+    mcp_server = await server_manager.create_local_server(server_name)
+    if not mcp_server:
+        logging.error(f"Failed to create local server: {server_name}")
+        sys.exit(1)
+
+    # Create Starlette app for SSE server
+    starlette_app = create_starlette_app(
+        mcp_server,
+        allow_origins=sse_settings.allow_origins,
+        debug=(sse_settings.log_level == "DEBUG"),
+    )
+
+    # Configure HTTP server
+    config = uvicorn.Config(
+        starlette_app,
+        host=sse_settings.bind_host,
+        port=sse_settings.port,
+        log_level=sse_settings.log_level.lower(),
+    )
+    http_server = uvicorn.Server(config)
+    
+    logging.info(f"Local MCP server '{server_name}' running at http://{sse_settings.bind_host}:{sse_settings.port}/sse")
+    await http_server.serve()
 
 
 if __name__ == "__main__":

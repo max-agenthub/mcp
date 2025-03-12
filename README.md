@@ -14,6 +14,10 @@
   - [2. SSE to stdio](#2-sse-to-stdio)
     - [2.1 Configuration](#21-configuration)
     - [2.2 Example usage](#22-example-usage)
+  - [3. Local MCP Servers](#3-local-mcp-servers)
+    - [3.1 Configuration](#31-configuration)
+    - [3.2 Example usage](#32-example-usage)
+    - [3.3 Available Local Servers](#33-available-local-servers)
   - [Installation](#installation)
     - [Installing via Smithery](#installing-via-smithery)
     - [Installing via PyPI](#installing-via-pypi)
@@ -26,10 +30,11 @@
 
 ## About
 
-The `mcp-proxy` is a tool that lets you switch between server transports. There are two supported modes:
+The `mcp-proxy` is a tool that lets you switch between server transports and provides local MCP servers. There are three supported modes:
 
 1. stdio to SSE
 2. SSE to stdio
+3. Local MCP servers
 
 ## 1. stdio to SSE
 
@@ -74,11 +79,11 @@ For Claude Desktop, the configuration entry can look like this:
 {
   "mcpServers": {
     "mcp-proxy": {
-        "command": "mcp-proxy",
-        "args": ["http://example.io/sse"],
-        "env": {
-          "API_ACCESS_TOKEN": "access-token"
-        }
+      "command": "mcp-proxy",
+      "args": ["http://example.io/sse"],
+      "env": {
+        "API_ACCESS_TOKEN": "access-token"
+      }
     }
   }
 }
@@ -135,6 +140,65 @@ mcp-proxy --sse-port=8080 -- uvx mcp-server-fetch --user-agent=YourUserAgent
 ```
 
 This will start an MCP server that can be connected to at `http://127.0.0.1:8080/sse`
+
+## 3. Local MCP Servers
+
+Run a local MCP server that provides tools for specific services like Slack or Google Sheets.
+
+This mode allows running local MCP servers that implement specific functionality without
+needing to connect to external servers.
+
+```mermaid
+graph LR
+    A["LLM Client"] <-->|SSE| B["mcp-proxy"]
+    B <-->|local| C["Built-in MCP Server"]
+
+    style A fill:#ffe6f9,stroke:#333,color:black,stroke-width:2px
+    style B fill:#e6e6ff,stroke:#333,color:black,stroke-width:2px
+    style C fill:#e6ffe6,stroke:#333,color:black,stroke-width:2px
+```
+
+### 3.1 Configuration
+
+This mode requires the `--local-server` argument to be set with the name of the server to run. The `--sse-port` argument can be set to specify the port number that the SSE server will listen on.
+
+Arguments
+
+| Name             | Required                   | Description                                            | Example             |
+| ---------------- | -------------------------- | ------------------------------------------------------ | ------------------- |
+| `--local-server` | Yes                        | The name of the local MCP server to run                | slack               |
+| `--sse-port`     | No, random available       | The SSE server port to listen on                       | 8080                |
+| `--sse-host`     | No, `127.0.0.1` by default | The host IP address that the SSE server will listen on | 0.0.0.0             |
+| `--allow-origin` | No                         | CORS allowed origins                                   | --allow-origin "\*" |
+| `--list-servers` | No                         | List all available local MCP servers and exit          | --list-servers      |
+
+### 3.2 Example usage
+
+To list all available local MCP servers:
+
+```bash
+mcp-proxy --list-servers
+```
+
+To start a specific local MCP server, such as the Slack MCP server:
+
+```bash
+# Start the Slack MCP server
+mcp-proxy --local-server slack --sse-port 8080
+```
+
+This will start a local Slack MCP server that can be connected to at `http://127.0.0.1:8080/sse`
+
+### 3.3 Available Local Servers
+
+The following local MCP servers are currently available:
+
+1. **slack** - Slack MCP server for interacting with the Slack API
+
+   - Tools: `SLACK_POST_MESSAGE`, `SLACK_LIST_CHANNELS`
+
+2. **googlesheets** - Google Sheets MCP server for interacting with the Google Sheets API
+   - Tools: `GOOGLESHEETS_CREATE_GOOGLE_SHEET1`, `GOOGLESHEETS_BATCH_UPDATE`
 
 ## Installation
 
@@ -224,16 +288,21 @@ services:
 
 ```bash
 usage: mcp-proxy [-h] [-H KEY VALUE] [-e KEY VALUE] [--pass-environment | --no-pass-environment] [--sse-port SSE_PORT] [--sse-host SSE_HOST]
-                 [--allow-origin ALLOW_ORIGIN [ALLOW_ORIGIN ...]]
+                 [--allow-origin ALLOW_ORIGIN [ALLOW_ORIGIN ...]] [--local-server LOCAL_SERVER] [--list-servers]
                  [command_or_url] [args ...]
 
-Start the MCP proxy in one of two possible modes: as an SSE or stdio client.
+Start the MCP proxy in one of three possible modes: as an SSE client, as a stdio client, or running a local MCP server.
 
 positional arguments:
   command_or_url        Command or URL to connect to. When a URL, will run an SSE client, otherwise will run the given command and connect as a stdio client. See corresponding options for more details.
 
 options:
   -h, --help            show this help message and exit
+
+Local server options:
+  --local-server LOCAL_SERVER
+                        Name of a local MCP server to run. Use --list-servers to see available servers.
+  --list-servers        List all available local MCP servers and exit.
 
 SSE client options:
   -H KEY VALUE, --headers KEY VALUE
@@ -258,6 +327,8 @@ Examples:
   mcp-proxy --sse-port 8080 -- your-command --arg1 value1 --arg2 value2
   mcp-proxy your-command --sse-port 8080 -e KEY VALUE -e ANOTHER_KEY ANOTHER_VALUE
   mcp-proxy your-command --sse-port 8080 --allow-origin='*'
+  mcp-proxy --local-server slack --sse-port 8080
+  mcp-proxy --list-servers
 ```
 
 ## Testing
@@ -277,4 +348,17 @@ mcp-proxy http://localhost:8080/sse
 fg
 
 # Send CTRL+C to stop the first server
+```
+
+You can also test the local MCP servers with the inspector tool:
+
+```bash
+# Run a local MCP server, such as the Slack server
+mcp-proxy --local-server slack --sse-port 8080 &
+
+# Use the inspector tool to connect to the server and test its functionality
+# Open http://localhost:8080/sse in the inspector
+
+# Press CTRL+C to stop the server
+fg
 ```

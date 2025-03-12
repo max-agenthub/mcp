@@ -46,6 +46,10 @@ mcp-reverse-proxy = "mcp_proxy.__main__:client"
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
 
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mcp_proxy*", "mcp_servers*"]
+
 [tool.uv]
 dev-dependencies = [
     "pytest>=8.3.3",
